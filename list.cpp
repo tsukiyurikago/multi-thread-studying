@@ -6,15 +6,17 @@
 class NODE
 {
 public:
+	std::mutex mlock;
 	int key;
 	NODE* next;
-	NODE() :next(nullptr) {}
+	NODE() : next(nullptr) {}
 	NODE(int a) :key(a), next(nullptr) {}
 	~NODE() {}
 };
 
 class CLIST
 {
+protected:
 	NODE head, tail;
 	std::mutex glock;
 public:
@@ -30,7 +32,7 @@ public:
 			delete ptr;
 		}
 	}
-	bool Add(int key)
+	virtual bool Add(int key)
 	{
 		NODE* pred, * curr;
 		pred = &head;
@@ -56,7 +58,7 @@ public:
 			return true;
 		}
 	}
-	bool Remove(int key)
+	virtual bool Remove(int key)
 	{
 		NODE* pred, * curr;
 		pred = &head;
@@ -80,7 +82,7 @@ public:
 			return false;
 		}
 	}
-	bool Contains(int key)
+	virtual bool Contains(int key)
 	{
 		NODE* pred, * curr;
 		pred = &head;
@@ -103,10 +105,106 @@ public:
 		}
 	}
 };
+class fine_grainedCLIST :public CLIST
+{
+public:
+	bool Add(int key) override
+	{
+		NODE* pred, * curr;
+		head.mlock.lock();
+		pred = &head;
+
+		/****	pred == *head	****/
+
+		curr = pred->next;
+
+		curr->mlock.lock();
+		while (curr->key < key)
+		{
+			pred->mlock.unlock();
+			pred = curr;
+			curr = curr->next;
+			curr->mlock.lock();
+		}
+		
+		if (curr->key == key)
+		{
+			pred->mlock.unlock();
+			curr->mlock.unlock();
+			return false;
+		}
+
+		NODE* node = new NODE{ key };
+		node->next = curr;
+		pred->next = node;
+		curr->mlock.unlock();
+		pred->mlock.unlock();
+		return true;
+	}
+	bool Remove(int key) override
+	{
+		NODE* pred, * curr;
+		head.mlock.lock();
+		pred = &head;
+
+		curr = pred->next;
+
+		curr->mlock.lock();
+		while (curr->key < key)
+		{
+			pred->mlock.unlock();
+			pred = curr;
+			curr = curr->next;
+			curr->mlock.lock();
+		}
+
+		if (curr->key == key)
+		{
+			pred->next = curr->next;
+			curr->mlock.unlock();
+			delete curr;
+			pred->mlock.unlock();
+			return true;
+		}
+
+		curr->mlock.unlock();
+		pred->mlock.unlock();
+		return false;
+	}
+	bool Contains(int key) override
+	{
+		NODE* pred, * curr;
+		head.mlock.lock();
+		pred = &head;
+
+		curr = pred->next;
+
+		curr->mlock.lock();
+		while (curr->key < key)
+		{
+			pred->mlock.unlock();
+			pred = curr;
+			curr = curr->next;
+			curr->mlock.lock();
+		}
+
+		if (curr->key == key)
+		{
+			curr->mlock.unlock();
+			pred->mlock.unlock();
+			return true;
+		}
+
+		curr->mlock.unlock();
+		pred->mlock.unlock();
+		return false;
+	}
+};
 constexpr auto NUM_TEST = 4'000'000;
 constexpr auto KEY_RANGE = 1'000;
 int NumOfThreads{ 6 };
 CLIST clist;
+fine_grainedCLIST fCLIST;
 void ThreadFunc(int num_thread)
 {
 	int key;
@@ -132,6 +230,31 @@ void ThreadFunc(int num_thread)
 		}
 	}
 }
+void fThreadFunc(int num_thread)
+{
+	int key;
+	for (int i = 0; i < NUM_TEST / num_thread; ++i)
+	{
+		switch (rand() % 3)
+		{
+		case 0:
+			key = rand() % KEY_RANGE;
+			fCLIST.Add(key);
+			break;
+		case 1:
+			key = rand() % KEY_RANGE;
+			fCLIST.Remove(key);
+			break;
+		case 2:
+			key = rand() % KEY_RANGE;
+			fCLIST.Contains(key);
+			break;
+		default:
+			std::cout << "Error\n";
+			exit(-1);
+		}
+	}
+}
 
 int main(void)
 {
@@ -140,7 +263,7 @@ int main(void)
 	auto start_t = std::chrono::high_resolution_clock::now();
 
 	for (int i = 0; i < NumOfThreads; ++i)
-		threads.emplace_back(ThreadFunc, i+1);
+		threads.emplace_back(fThreadFunc, i+1);
 	for (int i = 0; i < NumOfThreads; ++i)
 		threads[i].join();
 
