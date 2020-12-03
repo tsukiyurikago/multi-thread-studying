@@ -200,11 +200,144 @@ public:
 		return false;
 	}
 };
+class optimisticCLIST :public CLIST
+{
+private:
+	bool validate(NODE* pred, NODE* curr)
+	{
+		NODE* temp = &head;
+		while (temp->key <= pred->key)
+		{
+			if (temp == pred)
+				return pred->next == curr;
+			temp = temp->next;
+		}
+		return 0;
+	}
+public:
+	bool Add(int key) override
+	{
+		while (1)
+		{
+			NODE* pred, * curr;
+			pred = &head;
+			curr = pred->next;
+			while (curr->key < key)
+			{
+				pred = curr;
+				curr = curr->next;
+			}
+			pred->mlock.lock();
+			curr->mlock.lock();
+			if (validate(pred, curr))
+			{
+				if (curr->key == key)
+				{
+					pred->mlock.unlock();
+					curr->mlock.unlock();
+					return false;
+				}
+				else
+				{
+					NODE* temp = new NODE{ key };
+					temp->next = curr;
+					pred->next = temp;
+					pred->mlock.unlock();
+					curr->mlock.unlock();
+					return true;
+				}
+			}
+			else
+			{
+				pred->mlock.unlock();
+				curr->mlock.unlock();
+			}
+		}
+	}
+	bool Remove(int key) override
+	{
+		while (1)
+		{
+			NODE* pred, * curr;
+			pred = &head;
+			curr = pred->next;
+			while (curr->key < key)
+			{
+				pred = curr;
+				curr = curr->next;
+			}
+
+			pred->mlock.lock();
+			curr->mlock.lock();
+
+			if (validate(pred, curr))
+			{
+				if (curr->key == key)
+				{
+					pred->next = curr->next;
+					curr->mlock.unlock();
+					//delete curr;
+					pred->mlock.unlock();
+					return true;
+				}
+				else
+				{
+					pred->mlock.unlock();
+					curr->mlock.unlock();
+					return false;
+				}
+			}
+			else
+			{
+				pred->mlock.unlock();
+				curr->mlock.unlock();
+			}
+		}
+	}
+	bool Contains(int key) override
+	{
+		while (1)
+		{
+			NODE* pred, * curr;
+			pred = &head;
+			curr = pred->next;
+			while (curr->key < key)
+			{
+				pred = curr;
+				curr = curr->next;
+			}
+			pred->mlock.lock();
+			curr->mlock.lock();
+			if (validate(pred, curr))
+			{
+				if (curr->key == key)
+				{
+					pred->mlock.unlock();
+					curr->mlock.unlock();
+					return true;
+				}
+				else
+				{
+					pred->mlock.unlock();
+					curr->mlock.unlock();
+					return false;
+				}
+			}
+			else
+			{
+				pred->mlock.unlock();
+				curr->mlock.unlock();
+			}
+		}
+	}
+};
+
 constexpr auto NUM_TEST = 4'000'000;
 constexpr auto KEY_RANGE = 1'000;
 int NumOfThreads{ 6 };
 CLIST clist;
 fine_grainedCLIST fCLIST;
+optimisticCLIST oCLIST;
 void ThreadFunc(int num_thread)
 {
 	int key;
@@ -255,6 +388,31 @@ void fThreadFunc(int num_thread)
 		}
 	}
 }
+void oThreadFunc(int num_thread)
+{
+	int key;
+	for (int i = 0; i < NUM_TEST / num_thread; ++i)
+	{
+		switch (rand() % 3)
+		{
+		case 0:
+			key = rand() % KEY_RANGE;
+			oCLIST.Add(key);
+			break;
+		case 1:
+			key = rand() % KEY_RANGE;
+			oCLIST.Remove(key);
+			break;
+		case 2:
+			key = rand() % KEY_RANGE;
+			oCLIST.Contains(key);
+			break;
+		default:
+			std::cout << "Error\n";
+			exit(-1);
+		}
+	}
+}
 
 int main(void)
 {
@@ -263,7 +421,7 @@ int main(void)
 	auto start_t = std::chrono::high_resolution_clock::now();
 
 	for (int i = 0; i < NumOfThreads; ++i)
-		threads.emplace_back(fThreadFunc, i+1);
+		threads.emplace_back(oThreadFunc, i+1);
 	for (int i = 0; i < NumOfThreads; ++i)
 		threads[i].join();
 
