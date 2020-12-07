@@ -3,6 +3,53 @@
 #include<vector>
 #include<chrono>
 #include<thread>
+
+class NODE;
+
+class MPTR
+{
+	int value;
+public:
+	void Set(NODE* node, bool marked)
+	//	주소자료형은 결국 int 와 같은 크기의 비트
+	//	컴파일러가 자료형 크기를 4의 배수 단위로 할당하여 캐싱 용이, 등등의 이점을 얻는다 -- SIMD 와 비슷한 경우라고 생각중 -- float4개를 묶어서 로드 스토어 한다는 점에서? 32비트4개 - 128비트 , 이건 32비트
+	//	bool char 를 4byte 하는건 알겠는데
+	//	int 4byte 고, 오른쪽 2bit 사용하지 않는다 -- ??
+	//	생각해보자, int를 갖다가 메모리번지수로 쓰겠다 이걸 포인터 자료형으로 써왔다 지금까지
+	//	포인터자료형은 4칸 단위로 +- 한다 왜냐? 주로 쓰는게 int고, int 4바이트니까, 그리고 4의 배수 아닌 자료형도 4에 맞춰서 컴파일 (패킷 크기 줄이려고 프라그마 패킹 같은거 써야 실크기로 컴파일하겠다)
+	//	그러니까 포인터자료형은 항상 비트2자리가 00 이겠다 ㅇㅎ
+	{
+		value = reinterpret_cast<int>(node);
+		if (value)
+			//	xxxx xxxx .... xxxx 과 0000 0000 .... 0001 을 OR 하자
+			value = value | 0x01;
+		else
+			value = value & 0xFFFFFFFE;
+	}
+
+	NODE* Getptr(void)
+	{
+		return reinterpret_cast<NODE*>(value & 0xFFFFFFFE);
+	}
+
+	NODE* Getptr(bool* marked)
+	{
+		int temp = value;
+		if (0 == (temp & 0x1))
+			*marked = false;
+		else
+			*marked = true;
+		return reinterpret_cast<NODE*>(temp & 0xFFFFFFFE);
+	}
+	bool CAS(NODE* old_node, NODE* new_node, bool old_marked, bool new_marked)
+	{
+		int old_value, new_value;
+
+		old_value = reinterpret_cast<int>(old_node);
+
+	}
+};
+
 class NODE
 {
 public:
